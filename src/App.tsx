@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Heart, 
   Calendar, 
@@ -19,11 +19,15 @@ import {
   AlertCircle,
   TrendingUp,
   Shield,
-  Loader2
+  Loader2,
+  Copy,
+  Check,
+  Link
 } from 'lucide-react';
 import { CoupleUtils } from './utils/CoupleUtils';
 import { MenstrualUtils, MenstrualCycle, DayStatus, DayStatusTranslation } from './utils/MenstrualUtils';
 import { GeminiService, GeminiAnalysisResult } from './utils/GeminiService';
+import { useCouple } from './hooks/useCouple';
 
 // Interfaces for local React profiles matching Kotlin entity structures
 interface CoupleProfile {
@@ -141,16 +145,57 @@ export default function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
-  // Save to localStorage whenever states change
+  // Couple Sharing state & hook variables
+  const lastSyncedRef = useRef<{ profile: any; cycles: any[]; aiResult: any | null } | null>(null);
+  const [enteredJoinCode, setEnteredJoinCode] = useState('');
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedId, setCopiedId] = useState(false);
+
+  // Reactive subscription hook using our services
+  const {
+    coupleId,
+    isCreating,
+    isJoining,
+    isSyncing,
+    error: firebaseError,
+    setError: setFirebaseError,
+    createRoom,
+    joinRoom,
+    updateRoom,
+    disconnectRoom,
+    shareLink
+  } = useCouple((data) => {
+    lastSyncedRef.current = {
+      profile: data.profile,
+      cycles: data.cycles || [],
+      aiResult: data.aiResult || null
+    };
+    if (data.profile) setProfile(data.profile);
+    if (data.cycles) setCycles(data.cycles);
+    if (data.aiResult !== undefined) setAiResult(data.aiResult);
+  });
+
+  // Save to localStorage whenever states change or sync to active user Firestore
   useEffect(() => {
     localStorage.setItem('youlove_couple_profile', JSON.stringify(profile));
-  }, [profile]);
+    if (coupleId && !isSyncing) {
+      const isDiverged = !lastSyncedRef.current || JSON.stringify(lastSyncedRef.current.profile) !== JSON.stringify(profile);
+      if (isDiverged) {
+        updateRoom({ profile, cycles, aiResult });
+      }
+    }
+  }, [profile, coupleId, isSyncing, updateRoom]);
 
   useEffect(() => {
     localStorage.setItem('youlove_menstrual_cycles', JSON.stringify(cycles));
-    // Clear outdated selected date to refresh details
     setSelectedCalendarDate(null);
-  }, [cycles]);
+    if (coupleId && !isSyncing) {
+      const isDiverged = !lastSyncedRef.current || JSON.stringify(lastSyncedRef.current.cycles) !== JSON.stringify(cycles);
+      if (isDiverged) {
+        updateRoom({ profile, cycles, aiResult });
+      }
+    }
+  }, [cycles, coupleId, isSyncing, updateRoom]);
 
   useEffect(() => {
     if (aiResult) {
@@ -158,7 +203,63 @@ export default function App() {
     } else {
       localStorage.removeItem('youlove_ai_result');
     }
-  }, [aiResult]);
+    if (coupleId && !isSyncing) {
+      const isDiverged = !lastSyncedRef.current || JSON.stringify(lastSyncedRef.current.aiResult) !== JSON.stringify(aiResult);
+      if (isDiverged) {
+        updateRoom({ profile, cycles, aiResult });
+      }
+    }
+  }, [aiResult, coupleId, isSyncing, updateRoom]);
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(shareLink);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch (err) {
+      console.error("Unable to copy share link:", err);
+      alert(`Sao chép link thất bại. Bạn có thể sao chép thủ công:\n${shareLink}`);
+    }
+  };
+
+  const handleCopyCoupleId = async () => {
+    if (!coupleId) return;
+    try {
+      await navigator.clipboard.writeText(coupleId);
+      setCopiedId(true);
+      setTimeout(() => setCopiedId(false), 2000);
+    } catch (err) {
+      console.error("Unable to copy Room Code:", err);
+      alert(`Sao chép mã thất bại. Bạn có thể sao chép thủ công:\n${coupleId}`);
+    }
+  };
+
+  const handleCreateNewCouple = async () => {
+    try {
+      await createRoom({
+        profile,
+        cycles,
+        aiResult: aiResult || null,
+        settings: null
+      });
+    } catch (err: any) {
+      console.error("Failed to create room: ", err);
+    }
+  };
+
+  const handleJoinExistingCouple = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!enteredJoinCode.trim()) {
+      setFirebaseError("Vui lòng nhập mã phòng trước khi nhấn tham gia!");
+      return;
+    }
+    try {
+      await joinRoom(enteredJoinCode.trim());
+      setEnteredJoinCode('');
+    } catch (err: any) {
+      console.error("Failed to join room: ", err);
+    }
+  };
 
   // Clock ticks
   useEffect(() => {
@@ -624,25 +725,208 @@ export default function App() {
             <div>
               <h1 className="text-xl font-black bg-gradient-to-r from-rose-400 via-pink-400 to-indigo-400 bg-clip-text text-transparent tracking-tight">YOU LOVE</h1>
               <p className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold flex items-center gap-1">
-                <span>Trực Tuyến</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>{coupleId ? "Đã kết nối ❤️" : "Chưa kết nối 💔"}</span>
+                <span className={`w-1.5 h-1.5 rounded-full ${coupleId ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`}></span>
               </p>
             </div>
           </div>
 
-          {/* Time updates on web browser */}
-          <div className="bg-slate-800/80 border border-slate-700 rounded-full py-1.5 px-3 flex items-center gap-2 text-xs font-mono text-slate-300 shadow-md">
-            <Clock className="w-3.5 h-3.5 text-rose-400" />
-            <span>{currentTime || 'Loading...'}</span>
+          {/* Combined Time and Room Status */}
+          <div className="flex items-center gap-2.5">
+            {/* Time updates on web browser */}
+            <div className="hidden sm:flex bg-slate-800/80 border border-slate-700 rounded-full py-1.5 px-3 items-center gap-2 text-xs font-mono text-slate-300 shadow-md">
+              <Clock className="w-3.5 h-3.5 text-rose-400" />
+              <span>{currentTime || 'Loading...'}</span>
+            </div>
+
+            {/* Room connection status widget */}
+            {isCreating || isJoining || isSyncing ? (
+              <div className="bg-slate-800/85 border border-slate-700 rounded-full py-1.5 px-4 flex items-center gap-1.5 text-xs text-slate-400 shadow-md">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-500" />
+                <span className="hidden xs:inline">Đang kết nối...</span>
+              </div>
+            ) : coupleId ? (
+              <div className="flex items-center gap-2 bg-slate-800/85 border border-slate-700 rounded-full pl-3 pr-2 py-1 text-xs text-slate-100 shadow-md animate-fade-in">
+                <Smile className="w-4 h-4 text-rose-400 animate-pulse" />
+                <span 
+                  onClick={handleCopyCoupleId}
+                  className="cursor-pointer hover:text-rose-400 font-mono font-bold select-all text-rose-300"
+                  title="Mã phòng - Click để sao chép"
+                >
+                  {coupleId}
+                </span>
+                <button 
+                  onClick={handleCopyCoupleId}
+                  className="text-slate-400 hover:text-rose-300 p-1 rounded-full hover:bg-slate-700/50 transition-colors"
+                  title="Sao chép mã phòng"
+                >
+                  {copiedId ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+                <span className="text-slate-700">|</span>
+                <button 
+                  onClick={handleCopyLink}
+                  className="text-slate-400 hover:text-rose-300 p-1 rounded-full hover:bg-slate-700/50 transition-colors"
+                  title="Sao chép link mời ghép đôi"
+                >
+                  {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Link className="w-3.5 h-3.5" />}
+                </button>
+                <span className="text-slate-700">|</span>
+                <button 
+                  onClick={() => {
+                    if (confirm("Bạn có tin chắc muốn rời không gian chia sẻ này? Dữ liệu của bạn vẫn an toàn trên đám mây!")) {
+                      disconnectRoom();
+                    }
+                  }}
+                  className="bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-300 font-semibold px-2.5 py-1 rounded-full text-[10px] transition-colors"
+                >
+                  Rời phòng
+                </button>
+              </div>
+            ) : (
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-full py-1.5 px-3 text-xs font-semibold text-amber-300 shadow-sm">
+                Ngoại Tuyến
+              </div>
+            )}
           </div>
         </div>
       </header>
 
       {/* MAIN LAYOUT SCROLL CONTAINER */}
       <main id="app-main" className="flex-1 overflow-y-auto relative z-10 w-full max-w-4xl mx-auto px-4 py-6 pb-28">
+
+        {/* Syncing Progress Banner */}
+        {isSyncing && (
+          <div className="mb-6 bg-indigo-500/10 border border-indigo-500/20 rounded-3xl p-4 text-xs text-indigo-300 max-w-2xl mx-auto flex items-center justify-center gap-3 animate-pulse">
+            <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+            <span className="font-bold">Đang đồng bộ cuộc sống tình yêu của bạn từ Firestore...</span>
+          </div>
+        )}
+
+        {/* Firebase Error Notification */}
+        {firebaseError && (
+          <div className="mb-6 bg-red-500/15 border border-red-500/30 rounded-3xl p-5 text-xs text-red-350 max-w-2xl mx-auto flex items-start gap-3 relative animate-shake">
+            <AlertCircle className="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
+            <div className="space-y-1.5 flex-1 select-text">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-red-300 text-sm">Lỗi Hệ thống Chia sẻ ⚙️</span>
+                <button
+                  onClick={() => setFirebaseError(null)}
+                  className="p-1 hover:bg-red-500/10 text-red-400 hover:text-red-200 rounded-lg transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="leading-relaxed font-semibold">{firebaseError}</p>
+              <p className="text-[10px] text-slate-400 mt-2 font-mono leading-relaxed font-semibold">
+                Mẹo: Dữ liệu của hai bạn vẫn được bảo vệ an toàn trên bộ nhớ cục bộ (local storage). Vui lòng kiểm tra lại chất lượng mạng hoặc độ chính xác của mã phòng trước khi thử lại.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* TAB CONNECT ROOM FOR UNPAIRED USERS */}
+        {!coupleId && (
+          <div id="connect-space-screen" className="max-w-xl mx-auto space-y-6 pt-4 animate-fade-in select-text">
+            {/* Romantic Greeting Banner */}
+            <div className="text-center space-y-3 pb-4 select-none">
+              <div className="inline-flex p-3 bg-gradient-to-tr from-rose-500 to-pink-500 rounded-2xl shadow-xl shadow-rose-900/25">
+                <Sparkles className="w-8 h-8 text-white animate-pulse" />
+              </div>
+              <h2 className="text-3xl font-black text-rose-300 tracking-tight">Không Gian Kết Nối Trái Tim 💞</h2>
+              <p className="text-sm text-slate-300 max-w-md mx-auto leading-relaxed">
+                Đồng bộ nhịp điệu tình yêu, nhật ký ngày bên nhau, và chu kỳ sinh lý của bạn đời theo thời gian thực. Chọn một trong hai phương thức sau để bắt đầu:
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-2">
+              {/* Option 1: Create New Room */}
+              <div className="bg-slate-950/60 backdrop-blur-md rounded-3xl border border-slate-800 p-6 flex flex-col justify-between space-y-4 shadow-xl hover:border-rose-500/30 transition-all group select-none">
+                <div className="space-y-3">
+                  <div className="w-10 h-10 rounded-xl bg-rose-500/10 flex items-center justify-center border border-rose-500/20 text-rose-400 font-bold group-hover:scale-105 transition-transform">
+                    <Plus className="w-5 h-5" />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-100">Bắt đầu không gian mới</h3>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Khởi tạo một mã phòng ngẫu nhiên duy nhất dạng <code className="text-rose-300 font-mono font-bold">LOVE-XXXXXX</code> và tự động đẩy dữ liệu hiện tại trong máy lên đám mây.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isCreating || isJoining || isSyncing}
+                  onClick={handleCreateNewCouple}
+                  className="w-full bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 active:scale-98 text-white font-extrabold py-3 px-4 rounded-2xl text-xs shadow-lg shadow-rose-950/30 transition-all disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  {isCreating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Đang tạo phòng mới...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Heart className="w-4 h-4 text-white fill-white animate-bounce" />
+                      <span>Tạo Không Gian Yêu</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Option 2: Join Existing Room */}
+              <div className="bg-slate-950/60 backdrop-blur-md rounded-3xl border border-slate-800 p-6 flex flex-col justify-between space-y-4 shadow-xl hover:border-indigo-500/30 transition-all group">
+                <form onSubmit={handleJoinExistingCouple} className="space-y-4 flex-1 flex flex-col justify-between">
+                  <div className="space-y-3">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 text-indigo-400 font-bold group-hover:scale-105 transition-transform">
+                      <Link className="w-5 h-5" />
+                    </div>
+                    <h3 className="text-lg font-bold text-slate-100 select-none">Tham gia bằng mã phòng</h3>
+                    <p className="text-xs text-slate-400 leading-relaxed select-none">
+                      Nhập mã hoặc nhấp trực tiếp vào liên kết được người thương chia sẻ để ngay lập tức đồng bộ cuộc sống hai người.
+                    </p>
+
+                    <div className="pt-1">
+                      <input
+                        type="text"
+                        placeholder="LOVE-XXXXXX"
+                        value={enteredJoinCode}
+                        onChange={(e) => setEnteredJoinCode(e.target.value.toUpperCase())}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl py-2.5 px-3 text-sm text-center font-mono placeholder-slate-600 text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-extrabold uppercase font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isCreating || isJoining || isSyncing}
+                    className="w-full bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 active:scale-98 text-white font-extrabold py-3 px-4 rounded-2xl text-xs shadow-lg shadow-indigo-950/30 transition-all disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5 mt-2"
+                  >
+                    {isJoining ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-white" />
+                        <span>Đang kết nối...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Smile className="w-4 h-4 text-white animate-bounce" />
+                        <span>Tham Gia Ngay</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            {/* Offline Disclaimer */}
+            <div className="bg-slate-950/50 rounded-2xl border border-slate-800 p-4 text-xs text-slate-400 leading-relaxed flex items-center gap-3 select-none">
+              <Info className="w-5 h-5 text-rose-450 shrink-0" />
+              <span>
+                <strong>Chế độ hiện tại:</strong> Mọi thông tin hiện đang được ghi nhớ cục bộ an toàn trên thiết bị của bạn. Để đồng bộ hai chiều thời gian thực và tránh mất dữ liệu, việc khởi tạo một không gian chia sẻ là hoàn toàn được khuyến khích!
+              </span>
+            </div>
+          </div>
+        )}
         
         {/* TAB 1: LOVE DAYS INDEX SCREEN */}
-        {activeTab === 'love' && (
+        {coupleId && activeTab === 'love' && (
           <div id="love-tab-content" className="space-y-6 max-w-2xl mx-auto animate-fade-in">
             
             {/* CENTRAL CIRCLE DAY COUNT COMPONENT */}
@@ -867,7 +1151,7 @@ export default function App() {
         )}
 
         {/* TAB 2: MENSTRUAL CYCLE DIARY SCREEN */}
-        {activeTab === 'menstrual' && (
+        {coupleId && activeTab === 'menstrual' && (
           <div id="menstrual-tab-content" className="space-y-6 animate-fade-in animate-duration-300">
             
             {/* HERO WHEEL STATUS INDICATOR */}
@@ -1440,29 +1724,31 @@ export default function App() {
       {/* -------------------------------------------------------------
           BOTTOM NAVIGATION SCAFFOLD (SÁT VỚI JETPACK COMPOSE BOTTOM NAV)
          ------------------------------------------------------------- */}
-      <nav id="bottom-navigation-bar" className="fixed bottom-0 left-0 right-0 z-40 bg-slate-950/90 backdrop-blur-lg border-t border-slate-800 px-6 py-2 pb-6 flex items-center justify-around shadow-2xl">
-        <button 
-          onClick={() => setActiveTab('love')}
-          className={`flex-1 flex flex-col items-center justify-center gap-1 py-1.5 transition-all text-xs font-bold ${activeTab === 'love' ? 'text-rose-500 scale-105' : 'text-slate-400 hover:text-slate-200'}`}
-          id="tab-btn-love"
-        >
-          <div className={`p-1.5 rounded-xl ${activeTab === 'love' ? 'bg-rose-500/15' : 'bg-transparent'}`}>
-            <Heart className={`w-5 h-5 ${activeTab === 'love' ? 'fill-rose-500 stroke-rose-500' : ''}`} />
-          </div>
-          <span>Ngày Yêu ❤️</span>
-        </button>
+      {coupleId && (
+        <nav id="bottom-navigation-bar" className="fixed bottom-0 left-0 right-0 z-40 bg-slate-950/90 backdrop-blur-lg border-t border-slate-800 px-6 py-2 pb-6 flex items-center justify-around shadow-2xl">
+          <button 
+            onClick={() => setActiveTab('love')}
+            className={`flex-1 flex flex-col items-center justify-center gap-1 py-1.5 transition-all text-xs font-bold ${activeTab === 'love' ? 'text-rose-500 scale-105' : 'text-slate-400 hover:text-slate-200'}`}
+            id="tab-btn-love"
+          >
+            <div className={`p-1.5 rounded-xl ${activeTab === 'love' ? 'bg-rose-500/15' : 'bg-transparent'}`}>
+              <Heart className={`w-5 h-5 ${activeTab === 'love' ? 'fill-rose-500 stroke-rose-500' : ''}`} />
+            </div>
+            <span>Ngày Yêu ❤️</span>
+          </button>
 
-        <button 
-          onClick={() => setActiveTab('menstrual')}
-          className={`flex-1 flex flex-col items-center justify-center gap-1 py-1.5 transition-all text-xs font-bold ${activeTab === 'menstrual' ? 'text-rose-500 scale-105' : 'text-slate-400 hover:text-slate-200'}`}
-          id="tab-btn-menstrual"
-        >
-          <div className={`p-1.5 rounded-xl ${activeTab === 'menstrual' ? 'bg-rose-500/15' : 'bg-transparent'}`}>
-            <Calendar className="w-5 h-5" />
-          </div>
-          <span>Chu Kỳ Kinh Nguyệt 🩸</span>
-        </button>
-      </nav>
+          <button 
+            onClick={() => setActiveTab('menstrual')}
+            className={`flex-1 flex flex-col items-center justify-center gap-1 py-1.5 transition-all text-xs font-bold ${activeTab === 'menstrual' ? 'text-rose-500 scale-105' : 'text-slate-400 hover:text-slate-200'}`}
+            id="tab-btn-menstrual"
+          >
+            <div className={`p-1.5 rounded-xl ${activeTab === 'menstrual' ? 'bg-rose-500/15' : 'bg-transparent'}`}>
+              <Calendar className="w-5 h-5" />
+            </div>
+            <span>Chu Kỳ Kinh Nguyệt 🩸</span>
+          </button>
+        </nav>
+      )}
 
       {/* =============================================================
           DIALOG POPOUPS (DIALOGS)
