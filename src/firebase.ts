@@ -1,9 +1,12 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInAnonymously } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-const firebaseConfig = {
+import appletConfig from '../firebase-applet-config.json';
+
+const customConfig = {
   apiKey: "AIzaSyBlBURFnqoXb3ZhGms7gDWNp0Nu-P_QSZM",
   authDomain: "you-love-nta.firebaseapp.com",
+  databaseURL: "https://you-love-nta-default-rtdb.firebaseio.com",
   projectId: "you-love-nta",
   storageBucket: "you-love-nta.firebasestorage.app",
   messagingSenderId: "121180158299",
@@ -11,8 +14,22 @@ const firebaseConfig = {
   measurementId: "G-0NTDSFVKYC"
 };
 
+// Determine which config to use dynamically based on environment hostname
+const isDevEnvironment = typeof window !== 'undefined' && (
+  window.location.hostname.includes('asia-southeast1.run.app') ||
+  window.location.hostname.includes('localhost') ||
+  window.location.hostname.includes('127.0.0.1')
+);
+
+const firebaseConfig = isDevEnvironment ? appletConfig : customConfig;
+
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+
+// If using applet config in Dev/Preview, we specify the firestoreDatabaseId
+export const db = isDevEnvironment 
+  ? getFirestore(app, (appletConfig as any).firestoreDatabaseId) 
+  : getFirestore(app);
+
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 

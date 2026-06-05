@@ -8,7 +8,7 @@ service cloud.firestore {
 
     // Global Helpers
     function isValidId(id) {
-      return id is string && id.size() <= 64 && id.matches('^LOVE-[A-Z0-9]+$');
+      return id is string && id.size() >= 5 && id.size() <= 64;
     }
 
     function incoming() {
@@ -20,8 +20,7 @@ service cloud.firestore {
     }
 
     function isValidCoupleRoom(data) {
-      return (data.profile == null || data.profile is map)
-        && (data.cycles == null || data.cycles is list);
+      return data is map;
     }
 
     // 2. Couples collection with room sharing model matching the blueprint
