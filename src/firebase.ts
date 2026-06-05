@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInAnonymously } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 const firebaseConfig = {
   apiKey: "AIzaSyBlBURFnqoXb3ZhGms7gDWNp0Nu-P_QSZM",
@@ -15,6 +15,11 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+
+// Enable automated anonymous authentication on boot for rules support
+signInAnonymously(auth).catch((err) => {
+  console.warn("Automated anonymous sign-in skipped/failed:", err);
+});
 
 export enum OperationType {
   CREATE = 'create',

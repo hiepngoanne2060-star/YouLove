@@ -10,7 +10,9 @@ export function useCouple(
   });
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(() => {
+    return !!localStorage.getItem('youlove_couple_id');
+  });
   const [error, setError] = useState<string | null>(null);
 
   // Parse URL query parameter: room or room/couple ID from shared navigation link
@@ -19,8 +21,8 @@ export function useCouple(
       const params = new URLSearchParams(window.location.search);
       const urlRoom = params.get('room');
       if (urlRoom) {
-        const cleanRoom = urlRoom.trim().toUpperCase();
-        if (cleanRoom.startsWith('LOVE-') && cleanRoom.length >= 10) {
+        const cleanRoom = coupleService.extractCoupleId(urlRoom);
+        if (cleanRoom.length >= 11) {
           localStorage.setItem('youlove_couple_id', cleanRoom);
           setCoupleId(cleanRoom);
           
@@ -41,26 +43,44 @@ export function useCouple(
     setIsSyncing(true);
     setError(null);
 
+    let isDisposed = false;
+
     // Initial query fetch to quickly sync baseline states and verify connection
     coupleService.loadCouple(coupleId)
       .then((data) => {
-        onDataUpdate(data);
-        setIsSyncing(false);
+        if (!isDisposed) {
+          onDataUpdate(data);
+          setIsSyncing(false);
+        }
       })
       .catch((err: any) => {
-        console.error("Failed to load couple database baseline: ", err);
-        setError(err.message || "Không thể tải dữ liệu từ phòng này.");
-        setIsSyncing(false);
+        if (!isDisposed) {
+          console.error("Failed to load couple database baseline: ", err);
+          setError(err.message || "Không thể tải dữ liệu từ phòng này.");
+          setIsSyncing(false);
+          // If room doesn't exist, disconnect automatically to prevent stuck screens
+          if (err.message && err.message.includes('Không tìm thấy phòng liên kết')) {
+            localStorage.removeItem('youlove_couple_id');
+            setCoupleId(null);
+          }
+        }
       });
 
-    // Establish onSnapshot listener connection
+    // Establish onSnapshot listener connection with secure error handling
     const unsubscribe = coupleService.subscribeCouple(coupleId, (data) => {
-      onDataUpdate(data);
-      // clear error upon successful syncing update
-      setError(null);
+      if (!isDisposed) {
+        onDataUpdate(data);
+        setError(null);
+      }
+    }, (err) => {
+      if (!isDisposed) {
+        console.error("Real-time sync listener failed: ", err);
+        setError(err.message || "Lỗi kết nối thời gian thực với phòng chia sẻ.");
+      }
     });
 
     return () => {
+      isDisposed = true;
       unsubscribe();
     };
   }, [coupleId]);
@@ -87,7 +107,7 @@ export function useCouple(
     try {
       const docData = await coupleService.joinCouple(id);
       onDataUpdate(docData);
-      const sanitizedId = id.trim().toUpperCase();
+      const sanitizedId = coupleService.extractCoupleId(id);
       setCoupleId(sanitizedId);
       setIsJoining(false);
       return sanitizedId;

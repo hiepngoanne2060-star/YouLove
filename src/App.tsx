@@ -178,8 +178,8 @@ export default function App() {
   // Save to localStorage whenever states change or sync to active user Firestore
   useEffect(() => {
     localStorage.setItem('youlove_couple_profile', JSON.stringify(profile));
-    if (coupleId && !isSyncing) {
-      const isDiverged = !lastSyncedRef.current || JSON.stringify(lastSyncedRef.current.profile) !== JSON.stringify(profile);
+    if (coupleId && !isSyncing && lastSyncedRef.current) {
+      const isDiverged = JSON.stringify(lastSyncedRef.current.profile) !== JSON.stringify(profile);
       if (isDiverged) {
         updateRoom({ profile, cycles, aiResult });
       }
@@ -189,8 +189,8 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('youlove_menstrual_cycles', JSON.stringify(cycles));
     setSelectedCalendarDate(null);
-    if (coupleId && !isSyncing) {
-      const isDiverged = !lastSyncedRef.current || JSON.stringify(lastSyncedRef.current.cycles) !== JSON.stringify(cycles);
+    if (coupleId && !isSyncing && lastSyncedRef.current) {
+      const isDiverged = JSON.stringify(lastSyncedRef.current.cycles) !== JSON.stringify(cycles);
       if (isDiverged) {
         updateRoom({ profile, cycles, aiResult });
       }
@@ -203,8 +203,8 @@ export default function App() {
     } else {
       localStorage.removeItem('youlove_ai_result');
     }
-    if (coupleId && !isSyncing) {
-      const isDiverged = !lastSyncedRef.current || JSON.stringify(lastSyncedRef.current.aiResult) !== JSON.stringify(aiResult);
+    if (coupleId && !isSyncing && lastSyncedRef.current) {
+      const isDiverged = JSON.stringify(lastSyncedRef.current.aiResult) !== JSON.stringify(aiResult);
       if (isDiverged) {
         updateRoom({ profile, cycles, aiResult });
       }
@@ -816,7 +816,32 @@ export default function App() {
                   <X className="w-4 h-4" />
                 </button>
               </div>
-              <p className="leading-relaxed font-semibold">{firebaseError}</p>
+              <p className="leading-relaxed font-semibold">
+                {(() => {
+                  if (!firebaseError) return "";
+                  try {
+                    const parsed = JSON.parse(firebaseError);
+                    if (parsed && typeof parsed === 'object') {
+                      const msg = parsed.error || "";
+                      if (msg.includes("Missing or insufficient permissions") || msg.includes("permission-denied")) {
+                        return "Bạn không có quyền truy cập hoặc chỉnh sửa phòng này. Có thể mã phòng không hợp lệ hoặc đã hết hạn truy cập.";
+                      }
+                      if (msg.includes("Failed to get document because the client is offline") || msg.includes("offline")) {
+                        return "Kết nối mạng không ổn định hoặc lỗi dịch vụ ngoại tuyến. Hệ thống đã tự động chuyển sang chế độ Lưu cục bộ (Offline Local Mode) để bảo vệ dữ liệu thương yêu của bạn.";
+                      }
+                      return msg;
+                    }
+                  } catch (e) {}
+                  
+                  if (firebaseError.includes("insufficient permissions") || firebaseError.includes("permission-denied")) {
+                    return "Mã phòng không hợp lệ hoặc bạn không có quyền truy cập hoặc chỉnh sửa phòng này.";
+                  }
+                  if (firebaseError.includes("offline")) {
+                    return "Không thể ghép nối trực tiếp vì thiết bị đang ngoại tuyến. Hệ thống tự động kích hoạt chế độ lưu cục bộ an toàn.";
+                  }
+                  return firebaseError;
+                })()}
+              </p>
               <p className="text-[10px] text-slate-400 mt-2 font-mono leading-relaxed font-semibold">
                 Mẹo: Dữ liệu của hai bạn vẫn được bảo vệ an toàn trên bộ nhớ cục bộ (local storage). Vui lòng kiểm tra lại chất lượng mạng hoặc độ chính xác của mã phòng trước khi thử lại.
               </p>
